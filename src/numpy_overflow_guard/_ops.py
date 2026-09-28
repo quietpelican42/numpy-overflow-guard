@@ -30,15 +30,40 @@ from ._bounds import (
 
 
 def first_bad_index(mask: Any) -> tuple[int, ...] | None:
-    """The first ``True`` position in ``mask``, in C (row-major) order."""
-    if not mask.any():
+    """The first ``True`` position in ``mask``, in C (row-major) order.
+
+    ``mask`` is not always a proper ndarray: a fully-reduced operation (a
+    1-D @ 1-D matmul, a `.sum()` over the whole array) can produce a bare
+    Python ``bool`` or a NumPy scalar rather than an array, neither of which
+    supports ``.ravel()``/fancy indexing the way an ndarray does. Normalise
+    first so every caller gets the same behaviour regardless of shape.
+    """
+    arr = np.asarray(mask)
+    if not arr.any():
         return None
-    flat_index = int(np.flatnonzero(mask.ravel())[0])
-    return tuple(int(i) for i in np.unravel_index(flat_index, mask.shape))
+    if arr.ndim == 0:
+        return ()
+    flat_index = int(np.flatnonzero(arr.ravel())[0])
+    return tuple(int(i) for i in np.unravel_index(flat_index, arr.shape))
 
 
 def _no_overflow(shape: tuple[int, ...]) -> Any:
     return np.zeros(shape, dtype=np.bool_)
+
+
+def _lift_1d(*arrays: Any) -> tuple[tuple[int, ...], tuple[Any, ...]]:
+    """Promote 0-d arrays to shape ``(1,)`` so ``np.nonzero``/fancy indexing
+    work uniformly; returns the original shape to restore afterwards.
+
+    ``np.nonzero`` refuses 0-d arrays outright (``ValueError``), which is
+    exactly the shape a scalar ``checked_array`` (or two scalars broadcast
+    together) has. Every caller here reshapes its result back with the
+    returned shape before returning it.
+    """
+    shape = arrays[0].shape
+    if arrays[0].ndim == 0:
+        return shape, tuple(a.reshape(1) for a in arrays)
+    return shape, arrays
 
 
 # --------------------------------------------------------------------------
@@ -105,6 +130,7 @@ def check_multiply(a: Any, b: Any, dtype: np.dtype[Any]) -> Any:
     # bound (computed in float64, so it can be loose but never unsafe) to
     # find the lanes that could possibly overflow, then settle only those
     # exactly with Python ints.
+    shape, (a, b) = _lift_1d(a, b)
     bound = INT64_MUL_SAFE_BOUND if dtype.kind == "i" else UINT64_MUL_SAFE_BOUND
     mag_a = np.abs(a.astype(np.float64))
     mag_b = np.abs(b.astype(np.float64))
@@ -115,7 +141,7 @@ def check_multiply(a: Any, b: Any, dtype: np.dtype[Any]) -> Any:
         exact = a[idx].astype(object) * b[idx].astype(object)
         bad = (exact < lo) | (exact > hi)
         overflow[idx] = bad.astype(np.bool_)
-    return overflow
+    return overflow.reshape(shape)
 
 
 # --------------------------------------------------------------------------
@@ -126,6 +152,7 @@ def check_multiply(a: Any, b: Any, dtype: np.dtype[Any]) -> Any:
 
 def check_power(a: Any, exponent: Any, dtype: np.dtype[Any]) -> Any:
     a, exponent = np.broadcast_arrays(a, exponent)
+    shape, (a, exponent) = _lift_1d(a, exponent)
     lo, hi = bounds(dtype)
     width_bits = dtype.itemsize * 8
 
@@ -143,7 +170,7 @@ def check_power(a: Any, exponent: Any, dtype: np.dtype[Any]) -> Any:
         exact = a[idx].astype(object) ** exponent[idx].astype(object)
         bad = (exact < lo) | (exact > hi)
         overflow[idx] = bad.astype(np.bool_)
-    return overflow
+    return overflow.reshape(shape)
 
 
 # --------------------------------------------------------------------------
@@ -153,6 +180,7 @@ def check_power(a: Any, exponent: Any, dtype: np.dtype[Any]) -> Any:
 
 def check_left_shift(a: Any, shift: Any, dtype: np.dtype[Any]) -> Any:
     a, shift = np.broadcast_arrays(a, shift)
+    shape, (a, shift) = _lift_1d(a, shift)
     lo, hi = bounds(dtype)
     nonzero = shift != 0
     overflow = _no_overflow(a.shape)
@@ -161,7 +189,7 @@ def check_left_shift(a: Any, shift: Any, dtype: np.dtype[Any]) -> Any:
         exact = a[idx].astype(object) << shift[idx].astype(object)
         bad = (exact < lo) | (exact > hi)
         overflow[idx] = bad.astype(np.bool_)
-    return overflow
+    return overflow.reshape(shape)
 
 
 # --------------------------------------------------------------------------
@@ -215,5 +243,9 @@ def check_matmul(a: Any, b: Any, dtype: np.dtype[Any], result_shape: tuple[int, 
     if bound_val < limit * 0.9:
         return _no_overflow(result_shape)
 
-    exact = a.astype(object) @ b.astype(object)
+    # A 1-D @ 1-D matmul (vector dot product) contracts to a scalar. With
+    # dtype=object that scalar comes back as a bare Python int, and
+    # comparing it to lo/hi gives bare Python bools -- which have no
+    # .any()/.ravel(). np.asarray() normalises it back to a (0-d) ndarray.
+    exact = np.asarray(a.astype(object) @ b.astype(object))
     return (exact < lo) | (exact > hi)

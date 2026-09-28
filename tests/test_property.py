@@ -136,6 +136,84 @@ def test_left_shift_exact(dtype: type, data: st.DataObject) -> None:
         assert (ca << shift).tolist() == exact
 
 
+@_SETTINGS
+@given(dtype=st.sampled_from(ALL_INT_DTYPES), data=st.data())
+def test_1d_matmul_exact(dtype: type, data: st.DataObject) -> None:
+    # 1-D @ 1-D (vector dot product) contracts to a scalar, which is the
+    # shape that exposed the int64/uint64 object-dtype fallback returning a
+    # bare Python bool/int instead of something array-like.
+    a = data.draw(_int_arrays(dtype, n=4))
+    b = data.draw(_int_arrays(dtype, n=4))
+    exact = sum(int(x) * int(y) for x, y in zip(a.tolist(), b.tolist()))
+    expect_overflow = not fits(exact, np.dtype(dtype))
+    ca, cb = checked_array(a), checked_array(b)
+    if expect_overflow:
+        with pytest.raises(IntegerOverflowError) as excinfo:
+            ca @ cb
+        assert excinfo.value.index == ()
+        with pytest.raises(IntegerOverflowError):
+            ca.dot(cb)
+    else:
+        assert int(ca @ cb) == exact
+        assert int(ca.dot(cb)) == exact
+
+
+@_SETTINGS
+@given(dtype=st.sampled_from(ALL_INT_DTYPES), data=st.data())
+def test_scalar_operand_mix_exact(dtype: type, data: st.DataObject) -> None:
+    # A checked_array combined with a bare Python int (not another
+    # checked_array/ndarray) on either side of the operator -- this drove
+    # narrow-dtype arrays through np.broadcast_arrays against a 0-d operand,
+    # and int64/uint64 through the nonzero()-based candidate selection with
+    # a 0-d shape on one side.
+    info = np.iinfo(dtype)
+    a = data.draw(_int_arrays(dtype, n=3))
+    scalar = data.draw(st.integers(min_value=int(info.min), max_value=int(info.max)))
+    ca = checked_array(a)
+
+    exact_add = [int(x) + scalar for x in a.tolist()]
+    if any(not fits(v, np.dtype(dtype)) for v in exact_add):
+        with pytest.raises(IntegerOverflowError):
+            ca + scalar
+        with pytest.raises(IntegerOverflowError):
+            scalar + ca
+    else:
+        assert (ca + scalar).tolist() == exact_add
+        assert (scalar + ca).tolist() == exact_add
+
+    exact_mul = [int(x) * scalar for x in a.tolist()]
+    if any(not fits(v, np.dtype(dtype)) for v in exact_mul):
+        with pytest.raises(IntegerOverflowError):
+            ca * scalar
+        with pytest.raises(IntegerOverflowError):
+            scalar * ca
+    else:
+        assert (ca * scalar).tolist() == exact_mul
+        assert (scalar * ca).tolist() == exact_mul
+
+
+@_SETTINGS
+@given(dtype=st.sampled_from(ALL_INT_DTYPES), data=st.data())
+def test_0d_scalar_array_exact(dtype: type, data: st.DataObject) -> None:
+    # A 0-d checked_array (a scalar wrapped as an array, as opposed to a
+    # bare Python int operand) hits the same np.nonzero()-on-0-d hazard for
+    # multiply, since a 0-d array does not auto-promote the way a Python
+    # int operand does going into np.broadcast_arrays.
+    info = np.iinfo(dtype)
+    x = data.draw(st.integers(min_value=int(info.min), max_value=int(info.max)))
+    y = data.draw(st.integers(min_value=int(info.min), max_value=int(info.max)))
+    a = checked_array(np.array(x, dtype=dtype))
+    b = checked_array(np.array(y, dtype=dtype))
+
+    exact = int(x) * int(y)
+    if not fits(exact, np.dtype(dtype)):
+        with pytest.raises(IntegerOverflowError) as excinfo:
+            a * b
+        assert excinfo.value.index == ()
+    else:
+        assert int(a * b) == exact
+
+
 # -- negative controls: values comfortably inside range never raise --------
 
 
