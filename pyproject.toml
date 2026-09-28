@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "numpy-overflow-guard"
+version = "0.1.0"
+description = "Detect silent integer overflow in NumPy array arithmetic that np.errstate cannot catch"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "__AUTHOR__" }]
+keywords = ["numpy", "integer-overflow", "overflow", "arithmetic", "safety"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "hypothesis>=6.100", "mypy>=1.10"]
+
+[project.urls]
+Repository = "https://github.com/__GH_OWNER__/numpy-overflow-guard"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/numpy_overflow_guard"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "hypothesis.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
