@@ -9,7 +9,7 @@ description = "Detect silent integer overflow in NumPy array arithmetic that np.
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "__AUTHOR__" }]
+authors = [{ name = "kofiadeyemiq" }]
 keywords = ["numpy", "integer-overflow", "overflow", "arithmetic", "safety"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -29,7 +29,7 @@ dependencies = ["numpy>=1.24"]
 dev = ["pytest>=7", "hypothesis>=6.100", "mypy>=1.10"]
 
 [project.urls]
-Repository = "https://github.com/__GH_OWNER__/numpy-overflow-guard"
+Repository = "https://github.com/quietpelican42/numpy-overflow-guard"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/numpy_overflow_guard"]
